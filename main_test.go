@@ -1,4 +1,4 @@
-package golmdb_test
+package lmdb_test
 
 import (
 	"flag"

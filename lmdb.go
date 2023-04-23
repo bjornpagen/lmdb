@@ -1,4 +1,4 @@
-package golmdb
+package lmdb
 
 // #cgo CFLAGS: -g -Wall
 // #cgo LDFLAGS: -llmdb
