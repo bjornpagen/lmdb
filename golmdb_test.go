@@ -1,4 +1,4 @@
-package golmdb_test
+package lmdb_test
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/term"
 
-	"wellquite.org/golmdb"
+	golmdb "github.com/bjornpagen/lmdb"
 )
 
 func NewTestLogger(tb testing.TB) zerolog.Logger {

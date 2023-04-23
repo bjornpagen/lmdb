@@ -1,4 +1,4 @@
-package golmdb_test
+package lmdb_test
 
 import (
 	"bytes"
@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	golmdb "github.com/bjornpagen/lmdb"
 	"github.com/matryer/is"
-	"wellquite.org/golmdb"
 )
 
 // Running this with -soak=100 takes around 100 seconds. Don't forget

@@ -1,4 +1,4 @@
-package golmdb
+package lmdb
 
 /*
 #include <lmdb.h>
