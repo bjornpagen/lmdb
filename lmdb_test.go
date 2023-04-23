@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/term"
 
-	golmdb "github.com/bjornpagen/lmdb"
+	"github.com/bjornpagen/lmdb"
 )
 
 func NewTestLogger(tb testing.TB) zerolog.Logger {
@@ -38,30 +38,30 @@ func SetGlobalLogLevel(level zerolog.Level) {
 
 func TestVersion(t *testing.T) {
 	is := is.New(t)
-	is.True(golmdb.Version != "")
+	is.True(lmdb.Version != "")
 }
 
 func TestError(t *testing.T) {
 	is := is.New(t)
-	is.True(golmdb.LMDBError(golmdb.KeyExist).Error() != "")
+	is.True(lmdb.LMDBError(lmdb.KeyExist).Error() != "")
 }
 
-func createDatabase(log zerolog.Logger, batchSize uint) (client *golmdb.LMDBClient, dir string, err error) {
+func createDatabase(log zerolog.Logger, batchSize uint) (client *lmdb.LMDBClient, dir string, err error) {
 	dir, err = os.MkdirTemp("", "golmdb")
 	if err != nil {
 		return nil, "", err
 	}
 
-	client, err = golmdb.NewLMDB(log, dir, 0666, 100, 4, golmdb.NoReadAhead, batchSize)
+	client, err = lmdb.NewLMDB(log, dir, 0666, 100, 4, lmdb.NoReadAhead, batchSize)
 	if err != nil {
 		return nil, "", err
 	}
 	return client, dir, nil
 }
 
-func createDBRef(client *golmdb.LMDBClient, name string, extraFlags golmdb.DatabaseFlag) (dbRef golmdb.DBRef, err error) {
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
-		dbRef, err = txn.DBRef(name, golmdb.Create|extraFlags)
+func createDBRef(client *lmdb.LMDBClient, name string, extraFlags lmdb.DatabaseFlag) (dbRef lmdb.DBRef, err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
+		dbRef, err = txn.DBRef(name, lmdb.Create|extraFlags)
 		return err
 	})
 	return dbRef, err
@@ -89,30 +89,31 @@ func TestDBRef(t *testing.T) {
 	defer os.RemoveAll(dir)
 	defer client.TerminateSync()
 
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		_, err = txn.DBRef(t.Name(), 0) // should error because no Create flag
 		return err
 	})
-	is.True(err == golmdb.NotFound)
+	is.True(err == lmdb.NotFound)
 
 	dbRef1, err := createDBRef(client, t.Name(), 0) // will exist after this
 	is.NoErr(err)
 
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		_, err = txn.DBRef(t.Name(), 0) // should still exist
 		return err
 	})
 	is.NoErr(err)
 
 	dbRef2, err := createDBRef(client, t.Name()+"2", 0) // create a 2nd database
+	is.NoErr(err)
 
 	// now check that using the same key in both databases is distinct.
 	key := []byte("myFirstKey")
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
-		if err = txn.Put(dbRef1, key, []byte("hello"), golmdb.NoOverwrite); err != nil {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
+		if err = txn.Put(dbRef1, key, []byte("hello"), lmdb.NoOverwrite); err != nil {
 			return err
 		}
-		if err = txn.Put(dbRef2, key, []byte("world"), golmdb.NoOverwrite); err != nil {
+		if err = txn.Put(dbRef2, key, []byte("world"), lmdb.NoOverwrite); err != nil {
 			return err
 		}
 		return
@@ -120,7 +121,7 @@ func TestDBRef(t *testing.T) {
 	is.NoErr(err)
 
 	var val1, val2 []byte
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		if val1, err = txn.Get(dbRef1, key); err != nil {
 			return err
 		}
@@ -146,12 +147,12 @@ func TestEmptyDrop(t *testing.T) {
 
 	key := []byte(`hello`)
 	value := []byte(`world`)
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) error {
-		dbRef, err := txn.DBRef(t.Name(), golmdb.Create)
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) error {
+		dbRef, err := txn.DBRef(t.Name(), lmdb.Create)
 		if err != nil {
 			return err
 		}
-		if err = txn.Put(dbRef, key, value, golmdb.NoOverwrite); err != nil {
+		if err = txn.Put(dbRef, key, value, lmdb.NoOverwrite); err != nil {
 			return err
 		}
 		return nil
@@ -159,7 +160,7 @@ func TestEmptyDrop(t *testing.T) {
 	is.NoErr(err)
 
 	// empty
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) error {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) error {
 		dbRef, err := txn.DBRef(t.Name(), 0) // should still be there
 		if err != nil {
 			return err
@@ -174,7 +175,7 @@ func TestEmptyDrop(t *testing.T) {
 		}
 		if _, err := txn.Get(dbRef, key); err == nil {
 			return fmt.Errorf("Key-value pair still exists after emptying db.")
-		} else if err == golmdb.NotFound {
+		} else if err == lmdb.NotFound {
 			return nil
 		} else {
 			return err
@@ -183,14 +184,14 @@ func TestEmptyDrop(t *testing.T) {
 	is.NoErr(err)
 
 	// drop
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) error {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) error {
 		dbRef, err := txn.DBRef(t.Name(), 0) // should still be there
 		if err != nil {
 			return err
 		}
 		if _, err := txn.Get(dbRef, key); err == nil {
 			return fmt.Errorf("Key-value pair still exists after emptying db.")
-		} else if err != golmdb.NotFound {
+		} else if err != lmdb.NotFound {
 			return err
 		}
 		if err = txn.Drop(dbRef); err != nil {
@@ -221,10 +222,10 @@ func TestWriteReadDelete(t *testing.T) {
 	key := make([]byte, 8)
 
 	// write some key-value pairs
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
-			if err = txn.Put(dbRef, key, key, golmdb.NoOverwrite); err != nil {
+			if err = txn.Put(dbRef, key, key, lmdb.NoOverwrite); err != nil {
 				return err
 			}
 		}
@@ -233,7 +234,7 @@ func TestWriteReadDelete(t *testing.T) {
 	is.NoErr(err)
 
 	// check we can read them back
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			val, err := txn.Get(dbRef, key)
@@ -254,16 +255,16 @@ func TestWriteReadDelete(t *testing.T) {
 	is.NoErr(err)
 
 	// attempt to rewrite, but this should fail due to NoOverwrite
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		idx := 3
 		binary.BigEndian.PutUint64(key, uint64(idx))
-		return txn.Put(dbRef, key, key, golmdb.NoOverwrite)
+		return txn.Put(dbRef, key, key, lmdb.NoOverwrite)
 	})
-	is.True(err == golmdb.KeyExist)
+	is.True(err == lmdb.KeyExist)
 
 	val := make([]byte, 8)
 	// rewrite them all
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			binary.BigEndian.PutUint64(val, uint64(idx*2))
@@ -277,7 +278,7 @@ func TestWriteReadDelete(t *testing.T) {
 
 	valExpected := make([]byte, 8)
 	// check we can read them back
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			binary.BigEndian.PutUint64(valExpected, uint64(idx*2))
@@ -299,7 +300,7 @@ func TestWriteReadDelete(t *testing.T) {
 	is.NoErr(err)
 
 	// now delete every other
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		for idx := 0; idx < 64; idx += 2 {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			if err = txn.Delete(dbRef, key, nil); err != nil {
@@ -311,14 +312,14 @@ func TestWriteReadDelete(t *testing.T) {
 	is.NoErr(err)
 
 	// check the deletes were correct
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			binary.BigEndian.PutUint64(valExpected, uint64(idx*2))
 			val, err := txn.Get(dbRef, key)
 
 			if idx%2 == 0 { // should be deleted
-				if err == golmdb.NotFound {
+				if err == lmdb.NotFound {
 					err = nil
 					continue
 				} else {
@@ -345,12 +346,12 @@ func TestWriteReadDelete(t *testing.T) {
 
 	// now close the database and reopen it readonly
 	client.TerminateSync()
-	client2, err := golmdb.NewLMDB(log, dir, 0666, 16, 4, golmdb.NoReadAhead|golmdb.ReadOnly, 16)
+	client2, err := lmdb.NewLMDB(log, dir, 0666, 16, 4, lmdb.NoReadAhead|lmdb.ReadOnly, 16)
 	is.NoErr(err)
 	defer client2.TerminateSync()
 
 	// check it's all still there.
-	err = client2.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client2.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		dbRef, err := txn.DBRef(t.Name(), 0)
 		if err != nil {
 			return err
@@ -361,7 +362,7 @@ func TestWriteReadDelete(t *testing.T) {
 			val, err := txn.Get(dbRef, key)
 
 			if idx%2 == 0 { // should be deleted
-				if err == golmdb.NotFound {
+				if err == lmdb.NotFound {
 					err = nil
 					continue
 				} else {
@@ -387,7 +388,7 @@ func TestWriteReadDelete(t *testing.T) {
 	is.NoErr(err)
 
 	// check any attempt to Update a readonly gets an error:
-	err = client2.Update(func(txn *golmdb.ReadWriteTxn) (err error) { return nil })
+	err = client2.Update(func(txn *lmdb.ReadWriteTxn) (err error) { return nil })
 	is.True(err != nil)
 }
 
@@ -434,14 +435,14 @@ func TestCursor(t *testing.T) {
 	key := make([]byte, 8)
 	val := make([]byte, 8)
 
-	notFoundFuns := []func(*golmdb.ReadOnlyCursor) (key, val []byte, err error){
-		(*golmdb.ReadOnlyCursor).First,
-		(*golmdb.ReadOnlyCursor).Last,
-		(*golmdb.ReadOnlyCursor).Next,
-		(*golmdb.ReadOnlyCursor).Prev,
+	notFoundFuns := []func(*lmdb.ReadOnlyCursor) (key, val []byte, err error){
+		(*lmdb.ReadOnlyCursor).First,
+		(*lmdb.ReadOnlyCursor).Last,
+		(*lmdb.ReadOnlyCursor).Next,
+		(*lmdb.ReadOnlyCursor).Prev,
 	}
 	for _, fun := range notFoundFuns {
-		err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+		err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 			cursor, err := txn.NewCursor(dbRef)
 			if err != nil {
 				return err
@@ -457,15 +458,15 @@ func TestCursor(t *testing.T) {
 			}
 			return err
 		})
-		is.True(err == golmdb.NotFound)
+		is.True(err == lmdb.NotFound)
 	}
 
 	// write some key-value pairs
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			binary.BigEndian.PutUint64(val, uint64(63-idx))
-			if err = txn.Put(dbRef, key, val, golmdb.NoOverwrite); err != nil {
+			if err = txn.Put(dbRef, key, val, lmdb.NoOverwrite); err != nil {
 				return err
 			}
 		}
@@ -474,7 +475,7 @@ func TestCursor(t *testing.T) {
 	is.NoErr(err)
 
 	// check behaviour of first / last / next / prev / current
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) (err error) {
 		cursor, err := txn.NewCursor(dbRef)
 		if err != nil {
 			return err
@@ -487,7 +488,7 @@ func TestCursor(t *testing.T) {
 		if err = expectCursor(cursor.Current, 0, 63, nil); err != nil {
 			return err
 		}
-		if err = expectCursor(cursor.Prev, 0, 0, golmdb.NotFound); err != nil {
+		if err = expectCursor(cursor.Prev, 0, 0, lmdb.NotFound); err != nil {
 			return err
 		}
 		if err = expectCursor(cursor.Current, 0, 63, nil); err != nil {
@@ -512,7 +513,7 @@ func TestCursor(t *testing.T) {
 		if err = expectCursor(cursor.Current, 63, 0, nil); err != nil {
 			return err
 		}
-		if err = expectCursor(cursor.Next, 0, 0, golmdb.NotFound); err != nil {
+		if err = expectCursor(cursor.Next, 0, 0, lmdb.NotFound); err != nil {
 			return err
 		}
 		if err = expectCursor(cursor.Current, 63, 0, nil); err != nil {
@@ -535,7 +536,7 @@ func TestCursor(t *testing.T) {
 	is.NoErr(err)
 
 	// check Seek and SeekGreaterThanOrEqual
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		cursor, err := txn.NewCursor(dbRef)
 		if err != nil {
 			return err
@@ -571,7 +572,7 @@ func TestCursor(t *testing.T) {
 		val, err = cursor.SeekExactKey(key)
 		if val != nil {
 			return errors.New("Expected nil val")
-		} else if err != golmdb.NotFound {
+		} else if err != lmdb.NotFound {
 			return fmt.Errorf("Expected NotFound err. Got %v", err)
 		} else {
 			err = nil
@@ -583,7 +584,7 @@ func TestCursor(t *testing.T) {
 			return errors.New("Expected nil val")
 		} else if keyOut != nil {
 			return errors.New("Expected nil returned key")
-		} else if err != golmdb.NotFound {
+		} else if err != lmdb.NotFound {
 			return fmt.Errorf("Expected NotFound err. Got %v", err)
 		} else {
 			err = nil
@@ -642,7 +643,7 @@ func TestResize(t *testing.T) {
 
 	for idx := 0; idx < 100; idx++ {
 		binary.BigEndian.PutUint64(key, uint64(idx))
-		err = client.Update(func(txn *golmdb.ReadWriteTxn) error {
+		err = client.Update(func(txn *lmdb.ReadWriteTxn) error {
 			return txn.Put(dbRef, key, val, 0)
 		})
 		is.NoErr(err)
@@ -651,14 +652,14 @@ func TestResize(t *testing.T) {
 	val = make([]byte, size2)
 	for idx := 100; idx < 125; idx++ {
 		binary.BigEndian.PutUint64(key, uint64(idx))
-		err = client.Update(func(txn *golmdb.ReadWriteTxn) error {
+		err = client.Update(func(txn *lmdb.ReadWriteTxn) error {
 			return txn.Put(dbRef, key, val, 0)
 		})
 		is.NoErr(err)
 	}
 
 	// now have a quick read through them all
-	err = client.View(func(txn *golmdb.ReadOnlyTxn) error {
+	err = client.View(func(txn *lmdb.ReadOnlyTxn) error {
 		for idx := 0; idx < 125; idx++ {
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			val, err = txn.Get(dbRef, key)
@@ -690,20 +691,20 @@ func TestDupDB(t *testing.T) {
 	defer os.RemoveAll(dir)
 	defer client.TerminateSync()
 
-	dbRef, err := createDBRef(client, t.Name(), golmdb.DupSort)
+	dbRef, err := createDBRef(client, t.Name(), lmdb.DupSort)
 	is.NoErr(err)
 
 	key := make([]byte, 8)
 	val := make([]byte, 8)
 
 	// write some key-value pairs
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		for idx := 0; idx < 64; idx++ {
 			// for each key, we write key values
 			binary.BigEndian.PutUint64(key, uint64(idx))
 			for idy := 0; idy < idx; idy++ {
 				binary.BigEndian.PutUint64(val, uint64(idy))
-				if err = txn.Put(dbRef, key, val, golmdb.NoDupData); err != nil {
+				if err = txn.Put(dbRef, key, val, lmdb.NoDupData); err != nil {
 					return err
 				}
 				// Put it twice, just so that we know for sure that we
@@ -712,7 +713,7 @@ func TestDupDB(t *testing.T) {
 				if err = txn.Put(dbRef, key, val, 0); err != nil {
 					return err
 				}
-				if err = txn.Put(dbRef, key, val, golmdb.NoDupData); err == golmdb.KeyExist {
+				if err = txn.Put(dbRef, key, val, lmdb.NoDupData); err == lmdb.KeyExist {
 					err = nil
 				} else {
 					return fmt.Errorf("Expected KeyExist error, but got %v", err)
@@ -724,7 +725,7 @@ func TestDupDB(t *testing.T) {
 	is.NoErr(err)
 
 	// check prev and next etc
-	err = client.Update(func(txn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		cursor, err := txn.NewCursor(dbRef)
 		if err != nil {
 			return err
@@ -754,7 +755,7 @@ func TestDupDB(t *testing.T) {
 		if err = expectCursor(cursor.NextInSameKey, 3, 2, nil); err != nil {
 			return err
 		}
-		if err = expectCursor(cursor.NextInSameKey, 0, 0, golmdb.NotFound); err != nil {
+		if err = expectCursor(cursor.NextInSameKey, 0, 0, lmdb.NotFound); err != nil {
 			return err
 		}
 		if err = expectCursor(cursor.Next, 4, 0, nil); err != nil {
@@ -764,7 +765,7 @@ func TestDupDB(t *testing.T) {
 			return err
 		}
 
-		if err = expectCursor(cursor.PrevInSameKey, 0, 0, golmdb.NotFound); err != nil {
+		if err = expectCursor(cursor.PrevInSameKey, 0, 0, lmdb.NotFound); err != nil {
 			return err
 		}
 		if err = expectCursor(cursor.PrevKey, 4, 3, err); err != nil {
@@ -810,12 +811,12 @@ func TestDupDB(t *testing.T) {
 			return errors.New("wrong value for val")
 		}
 
-		if err = cursor.Delete(golmdb.NoDupData); err != nil { // delete all values
+		if err = cursor.Delete(lmdb.NoDupData); err != nil { // delete all values
 			return err
 		}
 
 		_, err = cursor.SeekExactKey(key)
-		if err != golmdb.NotFound {
+		if err != lmdb.NotFound {
 			return fmt.Errorf("Wrong error: expected NotFound, got %v", err)
 		} else {
 			err = nil
@@ -858,7 +859,7 @@ func TestDupDB(t *testing.T) {
 		}
 		binary.BigEndian.PutUint64(val, 29)
 		err = cursor.SeekExactKeyAndValue(key, val)
-		if err != golmdb.NotFound {
+		if err != lmdb.NotFound {
 			return fmt.Errorf("Wrong error: expected NotFonud, got %v", err)
 		} else {
 			err = nil
@@ -879,7 +880,7 @@ func TestDupDB(t *testing.T) {
 		binary.BigEndian.PutUint64(key, 32)
 		binary.BigEndian.PutUint64(val, 0)
 		_, err = cursor.SeekGreaterThanOrEqualKeyAndValue(key, val)
-		if err != golmdb.NotFound {
+		if err != lmdb.NotFound {
 			return fmt.Errorf("Wrong error: expected NotFonud, got %v", err)
 		} else {
 			err = nil
@@ -928,7 +929,7 @@ func TestLexicalSort(t *testing.T) {
 	defer os.RemoveAll(dir)
 	defer client.TerminateSync()
 
-	dbRef, err := createDBRef(client, t.Name(), golmdb.DupSort)
+	dbRef, err := createDBRef(client, t.Name(), lmdb.DupSort)
 	is.NoErr(err)
 
 	foo := []byte("foo")
@@ -939,7 +940,7 @@ func TestLexicalSort(t *testing.T) {
 	bar0 := append(bar, 0x00)
 	bar1 := append(bar, 0x01)
 
-	err = client.Update(func(rwtxn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(rwtxn *lmdb.ReadWriteTxn) (err error) {
 		for _, key := range [][]byte{foo, foo0, foo1, bar, bar0, bar1} {
 			if err = rwtxn.Put(dbRef, key, nil, 0); err != nil {
 				return err
@@ -949,7 +950,7 @@ func TestLexicalSort(t *testing.T) {
 	})
 	is.NoErr(err)
 
-	err = client.View(func(rotxn *golmdb.ReadOnlyTxn) (err error) {
+	err = client.View(func(rotxn *lmdb.ReadOnlyTxn) (err error) {
 		cursor, err := rotxn.NewCursor(dbRef)
 		if err != nil {
 			return err
@@ -990,7 +991,7 @@ func TestLexicalSort(t *testing.T) {
 		nextKeyInt.Add(nextKeyInt, big.NewInt(1))
 		nextKeyBytes := nextKeyInt.Bytes()
 
-		err = client.View(func(rotxn *golmdb.ReadOnlyTxn) (err error) {
+		err = client.View(func(rotxn *lmdb.ReadOnlyTxn) (err error) {
 			cursor, err := rotxn.NewCursor(dbRef)
 			if err != nil {
 				return err
@@ -1005,7 +1006,7 @@ func TestLexicalSort(t *testing.T) {
 
 			if !gotoLast {
 				_, _, err := cursor.SeekGreaterThanOrEqualKey(nextKeyBytes)
-				if err == golmdb.NotFound { // there is nothing after
+				if err == lmdb.NotFound { // there is nothing after
 					gotoLast = true
 					err = nil
 				} else if err != nil {

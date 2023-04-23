@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	golmdb "github.com/bjornpagen/lmdb"
+	"github.com/bjornpagen/lmdb"
 	"github.com/matryer/is"
 )
 
@@ -47,7 +47,7 @@ func TestSoak(t *testing.T) {
 	// chuck all the key value pairs in. We could range through
 	// keyValueMap but that's non-deterministic, and I'd prefer to keep
 	// as much as possible deterministic.
-	err = client.Update(func(rwtxn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(rwtxn *lmdb.ReadWriteTxn) (err error) {
 		for _, key := range keys {
 			val := keyValueMap[key]
 			if err = rwtxn.Put(dbRef, key[:], val[:], 0); err != nil {
@@ -155,10 +155,10 @@ func makeAllKeys(rng *rand.Rand) ([][8]byte, map[[8]byte][8]byte) {
 	return keys, keyValueMap
 }
 
-func runViewer(allViewersFinishedWG, viewersStartedWG *sync.WaitGroup, client *golmdb.LMDBClient, dbRef golmdb.DBRef, toCheck [][8]byte, keyValueMapSnapshot map[[8]byte][8]byte, errLock *sync.Mutex, errs *[]error) {
+func runViewer(allViewersFinishedWG, viewersStartedWG *sync.WaitGroup, client *lmdb.LMDBClient, dbRef lmdb.DBRef, toCheck [][8]byte, keyValueMapSnapshot map[[8]byte][8]byte, errLock *sync.Mutex, errs *[]error) {
 	defer allViewersFinishedWG.Done()
 	started := false
-	err := client.View(func(rotxn *golmdb.ReadOnlyTxn) (err error) {
+	err := client.View(func(rotxn *lmdb.ReadOnlyTxn) (err error) {
 		if !started {
 			started = true
 			viewersStartedWG.Done()
@@ -185,7 +185,7 @@ func runViewer(allViewersFinishedWG, viewersStartedWG *sync.WaitGroup, client *g
 	}
 }
 
-func modify(rng *rand.Rand, client *golmdb.LMDBClient, dbRef golmdb.DBRef, keyValueMap map[[8]byte][8]byte, toModify [][8]byte) (keyValueMapModified map[[8]byte][8]byte, modifiedCount int, err error) {
+func modify(rng *rand.Rand, client *lmdb.LMDBClient, dbRef lmdb.DBRef, keyValueMap map[[8]byte][8]byte, toModify [][8]byte) (keyValueMapModified map[[8]byte][8]byte, modifiedCount int, err error) {
 	// Because the txn can run multiple times (the txn could fail due
 	// to out of space and so gets re-run once the database size is
 	// increased), we want to form these skips outside the txn so that
@@ -198,7 +198,7 @@ func modify(rng *rand.Rand, client *golmdb.LMDBClient, dbRef golmdb.DBRef, keyVa
 	for idx := range skips {
 		skips[idx] = rng.Intn(3) != 0
 	}
-	err = client.Update(func(rwtxn *golmdb.ReadWriteTxn) (err error) {
+	err = client.Update(func(rwtxn *lmdb.ReadWriteTxn) (err error) {
 		keyValueMapModified = make(map[[8]byte][8]byte, len(keyValueMap))
 		modifiedCount = 0
 		for idx, key := range toModify {
