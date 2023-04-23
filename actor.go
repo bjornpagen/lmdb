@@ -21,16 +21,16 @@ type readWriteTxnMsg struct {
 	err    error                     // output
 }
 
-func readOnlyLMDBClient(environment *environment) *LMDBClient {
+func readOnlyLMDBClient(environment *environment) *Client {
 	environment.readOnly = true
 	resizeRequired := uint32(0)
-	return &LMDBClient{
+	return &Client{
 		environment:    environment,
 		resizeRequired: &resizeRequired,
 	}
 }
 
-func spawnLMDBActor(manager actors.ManagerClient, log *zerolog.Logger, environment *environment, batchSize uint) (*LMDBClient, error) {
+func spawnLMDBActor(manager actors.ManagerClient, log *zerolog.Logger, environment *environment, batchSize uint) (*Client, error) {
 	server := &server{
 		batchSize:    int(batchSize),
 		environment:  environment,
@@ -48,7 +48,7 @@ func spawnLMDBActor(manager actors.ManagerClient, log *zerolog.Logger, environme
 		return nil, err
 	}
 
-	return &LMDBClient{
+	return &Client{
 		ClientBase:     clientBase,
 		environment:    environment,
 		resizingLock:   server.resizingLock,
@@ -67,7 +67,7 @@ func spawnLMDBActor(manager actors.ManagerClient, log *zerolog.Logger, environme
 // Views (read-only transactions), Updates (read-write transactions),
 // and close/terminate the database. A single client is safe for any
 // number of go-routines to use concurrently.
-type LMDBClient struct {
+type Client struct {
 	*actors.ClientBase
 	environment         *environment
 	resizingLock        *sync.RWMutex
@@ -75,7 +75,7 @@ type LMDBClient struct {
 	readWriteTxnMsgPool *sync.Pool
 }
 
-var _ actors.Client = (*LMDBClient)(nil)
+var _ actors.Client = (*Client)(nil)
 
 // Run a View: a read-only transaction. The fun will be run in the
 // current go-routine. Multiple concurrent calls to View can proceed
@@ -89,19 +89,19 @@ var _ actors.Client = (*LMDBClient)(nil)
 // returned from this method.
 //
 // Nested transactions are not supported.
-func (self *LMDBClient) View(fun func(rotxn *ReadOnlyTxn) error) (err error) {
-	if !self.environment.readOnly {
-		self.resizingLock.RLock()
-		defer self.resizingLock.RUnlock()
+func (c *Client) View(fun func(rotxn *ReadOnlyTxn) error) (err error) {
+	if !c.environment.readOnly {
+		c.resizingLock.RLock()
+		defer c.resizingLock.RUnlock()
 	}
 
-	txn, err := self.environment.txnBegin(true, nil)
+	txn, err := c.environment.txnBegin(true, nil)
 	if err != nil {
 		return err
 	}
 	readOnlyTxn := ReadOnlyTxn{
 		txn:            txn,
-		resizeRequired: self.resizeRequired,
+		resizeRequired: c.resizeRequired,
 	}
 	// use a defer as it'll run even on a panic
 	defer C.mdb_txn_abort(txn)
@@ -109,8 +109,8 @@ func (self *LMDBClient) View(fun func(rotxn *ReadOnlyTxn) error) (err error) {
 		err := fun(&readOnlyTxn)
 		if err == MapFull {
 			// unlock and wait to relock so that the server can resize.
-			self.resizingLock.RUnlock()
-			self.resizingLock.RLock()
+			c.resizingLock.RUnlock()
+			c.resizingLock.RLock()
 			continue
 		}
 		return err
@@ -139,20 +139,20 @@ func (self *LMDBClient) View(fun func(rotxn *ReadOnlyTxn) error) (err error) {
 // with one or more View transactions.
 //
 // Nested transactions are not supported.
-func (self *LMDBClient) Update(fun func(rwtxn *ReadWriteTxn) error) error {
-	if self.environment.readOnly {
-		return errors.New("Cannot update: LMDB has been opened in ReadOnly mode")
+func (c *Client) Update(fun func(rwtxn *ReadWriteTxn) error) error {
+	if c.environment.readOnly {
+		return errors.New("cannot update: LMDB has been opened in ReadOnly mode")
 	}
 
-	msg := self.readWriteTxnMsgPool.Get().(*readWriteTxnMsg)
+	msg := c.readWriteTxnMsgPool.Get().(*readWriteTxnMsg)
 	msg.txnFun = fun
 
-	if self.SendSync(msg, true) {
+	if c.SendSync(msg, true) {
 		err := msg.err
-		self.readWriteTxnMsgPool.Put(msg)
+		c.readWriteTxnMsgPool.Put(msg)
 		return err
 	} else {
-		self.readWriteTxnMsgPool.Put(msg)
+		c.readWriteTxnMsgPool.Put(msg)
 		return errors.New("golmdb server is terminated")
 	}
 }
@@ -173,11 +173,11 @@ func (self *LMDBClient) Update(fun func(rwtxn *ReadWriteTxn) error) error {
 // merely refers to the fact this method is synchronous - it'll only
 // return once the actor has fully terminated and the LMDB database
 // has been closed.
-func (self *LMDBClient) TerminateSync() {
-	if !self.environment.readOnly {
-		self.ClientBase.TerminateSync()
+func (c *Client) TerminateSync() {
+	if !c.environment.readOnly {
+		c.ClientBase.TerminateSync()
 	}
-	self.environment.close()
+	c.environment.close()
 }
 
 // Manually sync the database to disk.
@@ -193,8 +193,8 @@ func (self *LMDBClient) TerminateSync() {
 // for example when rapidly loading a data set into the database. An
 // explicit call to Sync is then needed to flush everything through
 // onto disk.
-func (self *LMDBClient) Sync(force bool) error {
-	return self.environment.sync(force)
+func (c *Client) Sync(force bool) error {
+	return c.environment.sync(force)
 }
 
 // Copy the entire database to a new path, optionally compacting it.
@@ -210,8 +210,8 @@ func (self *LMDBClient) Sync(force bool) error {
 // due to needing to keep the old data around so that the read-only
 // transaction doing the copy sees a consistent snapshot of the entire
 // database.
-func (self *LMDBClient) Copy(path string, compact bool) error {
-	return self.environment.copy(path, compact)
+func (c *Client) Copy(path string, compact bool) error {
+	return c.environment.copy(path, compact)
 }
 
 // --- Server side ---
@@ -229,34 +229,34 @@ type server struct {
 
 var _ actors.Server = (*server)(nil)
 
-func (self *server) Init(log zerolog.Logger, mailboxReader *mailbox.MailboxReader, selfClient *actors.ClientBase) (err error) {
+func (s *server) Init(log zerolog.Logger, mailboxReader *mailbox.MailboxReader, selfClient *actors.ClientBase) (err error) {
 	// this is required for the writer - even though we use NoTLS
 	runtime.LockOSThread()
-	readWriteTxn := &self.readWriteTxn
-	readWriteTxn.resizeRequired = &self.resizeRequired
-	return self.ServerBase.Init(log, mailboxReader, selfClient)
+	readWriteTxn := &s.readWriteTxn
+	readWriteTxn.resizeRequired = &s.resizeRequired
+	return s.ServerBase.Init(log, mailboxReader, selfClient)
 }
 
-func (self *server) HandleMsg(msg mailbox.Msg) error {
+func (s *server) HandleMsg(msg mailbox.Msg) error {
 	switch msgT := msg.(type) {
 	case *readWriteTxnMsg:
-		self.batch = append(self.batch, msgT)
-		if len(self.batch) == self.batchSize || self.MailboxReader.IsEmpty() {
-			batch := self.batch
-			self.batch = self.batch[:0]
-			if self.Log.Trace().Enabled() {
-				self.Log.Trace().Int("batch size", len(batch)).Msg("running batch")
+		s.batch = append(s.batch, msgT)
+		if len(s.batch) == s.batchSize || s.MailboxReader.IsEmpty() {
+			batch := s.batch
+			s.batch = s.batch[:0]
+			if s.Log.Trace().Enabled() {
+				s.Log.Trace().Int("batch size", len(batch)).Msg("running batch")
 			}
-			return self.runBatch(batch)
+			return s.runBatch(batch)
 		}
 		return nil
 
 	default:
-		return self.ServerBase.HandleMsg(msg)
+		return s.ServerBase.HandleMsg(msg)
 	}
 }
 
-func (self *server) runBatch(batch []*readWriteTxnMsg) error {
+func (s *server) runBatch(batch []*readWriteTxnMsg) error {
 	switch batchLen := len(batch); batchLen {
 	case 0:
 		return nil
@@ -264,7 +264,7 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 	case 1:
 		msg := batch[0]
 		for {
-			txnErr, fatalErr := self.runAndCommitWriteTxnMsg(batch, nil, msg)
+			txnErr, fatalErr := s.runAndCommitWriteTxnMsg(batch, nil, msg)
 			if fatalErr != nil {
 				markBatchProcessed(batch, fatalErr)
 				return fatalErr
@@ -273,7 +273,7 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 			if txnErr == MapFull {
 				// MapFull can come either from a Put, or from a Commit. We
 				// need to increase the size, and then re-run the txn.
-				fatalErr = self.increaseSize()
+				fatalErr = s.increaseSize()
 				if fatalErr == nil {
 					continue
 				} else {
@@ -288,7 +288,7 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 
 	default:
 		for batchLen > 0 {
-			outerTxn, outerErr := self.environment.txnBegin(false, nil)
+			outerTxn, outerErr := s.environment.txnBegin(false, nil)
 			if outerErr != nil {
 				// if we can't even create the txn, that's fatal to the whole system
 				markBatchProcessed(batch, outerErr)
@@ -300,7 +300,7 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 					continue
 				}
 
-				innerTxnErr, innerFatalErr := self.runAndCommitWriteTxnMsg(batch, outerTxn, msg)
+				innerTxnErr, innerFatalErr := s.runAndCommitWriteTxnMsg(batch, outerTxn, msg)
 				if innerFatalErr != nil {
 					markBatchProcessed(batch, innerFatalErr)
 					return innerFatalErr
@@ -327,7 +327,7 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 			if outerErr == MapFull {
 				// MapFull can come either from a Put, or from a Commit. We
 				// need to increase the size, and then re-run the entire batch.
-				outerErr = self.increaseSize()
+				outerErr = s.increaseSize()
 				if outerErr == nil {
 					continue
 				} else {
@@ -340,7 +340,7 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 				// 1-by-1 in the hope that individually, they will not
 				// overfill transactions.
 				for idx := 0; idx < batchLen; idx++ {
-					fatalErr := self.runBatch(batch[idx : idx+1])
+					fatalErr := s.runBatch(batch[idx : idx+1])
 					if fatalErr != nil {
 						markBatchProcessed(batch[idx+1:], fatalErr)
 						return fatalErr
@@ -356,14 +356,14 @@ func (self *server) runBatch(batch []*readWriteTxnMsg) error {
 	}
 }
 
-func (self *server) runAndCommitWriteTxnMsg(batch []*readWriteTxnMsg, parentTxn *C.MDB_txn, msg *readWriteTxnMsg) (txnErr, fatalErr error) {
-	txn, err := self.environment.txnBegin(false, parentTxn)
+func (s *server) runAndCommitWriteTxnMsg(batch []*readWriteTxnMsg, parentTxn *C.MDB_txn, msg *readWriteTxnMsg) (txnErr, fatalErr error) {
+	txn, err := s.environment.txnBegin(false, parentTxn)
 	if err != nil {
 		// if we can't even create the txn, that's fatal to the whole system
 		return nil, err
 	}
 
-	readWriteTxn := &self.readWriteTxn
+	readWriteTxn := &s.readWriteTxn
 	readWriteTxn.txn = txn
 	err = msg.txnFun(readWriteTxn)
 	readWriteTxn.txn = nil
@@ -385,33 +385,33 @@ func markBatchProcessed(batch []*readWriteTxnMsg, err error) {
 	}
 }
 
-func (self *server) Terminated(err error, caughtPanic interface{}) {
-	if self.readWriteTxn.txn != nil { // this can happen if a txn fun panics
-		C.mdb_txn_abort(self.readWriteTxn.txn)
-		self.readWriteTxn.txn = nil
+func (s *server) Terminated(err error, caughtPanic interface{}) {
+	if s.readWriteTxn.txn != nil { // this can happen if a txn fun panics
+		C.mdb_txn_abort(s.readWriteTxn.txn)
+		s.readWriteTxn.txn = nil
 	}
-	self.ServerBase.Terminated(err, caughtPanic)
+	s.ServerBase.Terminated(err, caughtPanic)
 }
 
-func (self *server) increaseSize() error {
-	atomic.StoreUint32(&self.resizeRequired, 1)
-	self.resizingLock.Lock()
-	defer self.resizingLock.Unlock()
-	defer atomic.StoreUint32(&self.resizeRequired, 0)
+func (s *server) increaseSize() error {
+	atomic.StoreUint32(&s.resizeRequired, 1)
+	s.resizingLock.Lock()
+	defer s.resizingLock.Unlock()
+	defer atomic.StoreUint32(&s.resizeRequired, 0)
 
-	currentMapSize := self.environment.mapSize
+	currentMapSize := s.environment.mapSize
 	mapSize := uint64(float64(currentMapSize) * 1.5)
-	if remainder := mapSize % self.environment.pageSize; remainder != 0 {
-		mapSize = (mapSize + self.environment.pageSize) - remainder
+	if remainder := mapSize % s.environment.pageSize; remainder != 0 {
+		mapSize = (mapSize + s.environment.pageSize) - remainder
 	}
 
-	if err := self.environment.setMapSize(mapSize); err != nil {
-		self.Log.Error().Uint64("current size", currentMapSize).Uint64("new size", mapSize).Err(err).Msg("increasing map size")
+	if err := s.environment.setMapSize(mapSize); err != nil {
+		s.Log.Error().Uint64("current size", currentMapSize).Uint64("new size", mapSize).Err(err).Msg("increasing map size")
 		return err
 	}
-	if self.Log.Debug().Enabled() {
-		self.Log.Debug().Uint64("current size", currentMapSize).Uint64("new size", mapSize).Msg("increasing map size")
+	if s.Log.Debug().Enabled() {
+		s.Log.Debug().Uint64("current size", currentMapSize).Uint64("new size", mapSize).Msg("increasing map size")
 	}
-	self.environment.mapSize = mapSize
+	s.environment.mapSize = mapSize
 	return nil
 }

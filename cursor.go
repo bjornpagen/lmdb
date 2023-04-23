@@ -35,16 +35,16 @@ type ReadWriteCursor struct {
 // before the end of the transaction.
 //
 // See http://www.lmdb.tech/doc/group__mdb.html#ga9ff5d7bd42557fd5ee235dc1d62613aa
-func (self *ReadOnlyTxn) NewCursor(db DBRef) (*ReadOnlyCursor, error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (txn *ReadOnlyTxn) NewCursor(db DBRef) (*ReadOnlyCursor, error) {
+	if atomic.LoadUint32(txn.resizeRequired) == 1 {
 		return nil, MapFull
 	}
 	var cursor *C.MDB_cursor
-	err := asError(C.mdb_cursor_open(self.txn, C.MDB_dbi(db), &cursor))
+	err := asError(C.mdb_cursor_open(txn.txn, C.MDB_dbi(db), &cursor))
 	if err != nil {
 		return nil, err
 	}
-	return &ReadOnlyCursor{cursor: cursor, resizeRequired: self.resizeRequired}, nil
+	return &ReadOnlyCursor{cursor: cursor, resizeRequired: txn.resizeRequired}, nil
 }
 
 // Create a new read-write cursor.
@@ -58,30 +58,30 @@ func (self *ReadOnlyTxn) NewCursor(db DBRef) (*ReadOnlyCursor, error) {
 // before the end of the transaction.
 //
 // See http://www.lmdb.tech/doc/group__mdb.html#ga9ff5d7bd42557fd5ee235dc1d62613aa
-func (self *ReadWriteTxn) NewCursor(db DBRef) (*ReadWriteCursor, error) {
+func (txn *ReadWriteTxn) NewCursor(db DBRef) (*ReadWriteCursor, error) {
 	var cursor *C.MDB_cursor
-	err := asError(C.mdb_cursor_open(self.txn, C.MDB_dbi(db), &cursor))
+	err := asError(C.mdb_cursor_open(txn.txn, C.MDB_dbi(db), &cursor))
 	if err != nil {
 		return nil, err
 	}
-	return &ReadWriteCursor{ReadOnlyCursor{cursor: cursor, resizeRequired: self.resizeRequired}}, nil
+	return &ReadWriteCursor{ReadOnlyCursor{cursor: cursor, resizeRequired: txn.resizeRequired}}, nil
 }
 
 // Close the current cursor.
 //
 // You should call Close() on each cursor before the end of the
 // transaction in which it was created.
-func (self *ReadOnlyCursor) Close() {
-	C.mdb_cursor_close(self.cursor)
-	self.cursor = nil
+func (cursor *ReadOnlyCursor) Close() {
+	C.mdb_cursor_close(cursor.cursor)
+	cursor.cursor = nil
 }
 
-func (self *ReadOnlyCursor) moveAndGet0(op cursorOp) (key, val []byte, err error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (cursor *ReadOnlyCursor) moveAndGet0(op cursorOp) (key, val []byte, err error) {
+	if atomic.LoadUint32(cursor.resizeRequired) == 1 {
 		return nil, nil, MapFull
 	}
 	var keyVal, valVal value
-	err = asError(C.mdb_cursor_get(self.cursor, (*C.MDB_val)(&keyVal), (*C.MDB_val)(&valVal), C.MDB_cursor_op(op)))
+	err = asError(C.mdb_cursor_get(cursor.cursor, (*C.MDB_val)(&keyVal), (*C.MDB_val)(&valVal), C.MDB_cursor_op(op)))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,12 +89,12 @@ func (self *ReadOnlyCursor) moveAndGet0(op cursorOp) (key, val []byte, err error
 	return keyVal.bytesNoCopy(), valVal.bytesNoCopy(), nil
 }
 
-func (self *ReadOnlyCursor) moveAndGet1(op cursorOp, keyIn []byte) (key, val []byte, err error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (cursor *ReadOnlyCursor) moveAndGet1(op cursorOp, keyIn []byte) (key, val []byte, err error) {
+	if atomic.LoadUint32(cursor.resizeRequired) == 1 {
 		return nil, nil, MapFull
 	}
 	var keyVal, valVal value
-	err = asError(C.golmdb_mdb_cursor_get1(self.cursor,
+	err = asError(C.golmdb_mdb_cursor_get1(cursor.cursor,
 		(*C.char)(unsafe.Pointer(&keyIn[0])), C.size_t(len(keyIn)),
 		(*C.MDB_val)(&keyVal), (*C.MDB_val)(&valVal), C.MDB_cursor_op(op)))
 	if err != nil {
@@ -104,12 +104,12 @@ func (self *ReadOnlyCursor) moveAndGet1(op cursorOp, keyIn []byte) (key, val []b
 	return keyVal.bytesNoCopy(), valVal.bytesNoCopy(), nil
 }
 
-func (self *ReadOnlyCursor) moveAndGet2(op cursorOp, keyIn, valIn []byte) (val []byte, err error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (cursor *ReadOnlyCursor) moveAndGet2(op cursorOp, keyIn, valIn []byte) (val []byte, err error) {
+	if atomic.LoadUint32(cursor.resizeRequired) == 1 {
 		return nil, MapFull
 	}
 	var valVal value
-	err = asError(C.golmdb_mdb_cursor_get2(self.cursor,
+	err = asError(C.golmdb_mdb_cursor_get2(cursor.cursor,
 		(*C.char)(unsafe.Pointer(&keyIn[0])), C.size_t(len(keyIn)),
 		(*C.char)(unsafe.Pointer(&valIn[0])), C.size_t(len(valIn)),
 		(*C.MDB_val)(&valVal), C.MDB_cursor_op(op)))
@@ -125,8 +125,8 @@ func (self *ReadOnlyCursor) moveAndGet2(op cursorOp, keyIn, valIn []byte) (val [
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) First() (key, val []byte, err error) {
-	return self.moveAndGet0(first)
+func (cursor *ReadOnlyCursor) First() (key, val []byte, err error) {
+	return cursor.moveAndGet0(first)
 }
 
 // Only for DupSort. Move to the first key-value pair without changing
@@ -134,8 +134,8 @@ func (self *ReadOnlyCursor) First() (key, val []byte, err error) {
 //
 // Do not write into the returned val byte slice. Doing so will cause
 // a segfault.
-func (self *ReadOnlyCursor) FirstInSameKey() (val []byte, err error) {
-	_, val, err = self.moveAndGet0(firstDup)
+func (cursor *ReadOnlyCursor) FirstInSameKey() (val []byte, err error) {
+	_, val, err = cursor.moveAndGet0(firstDup)
 	return val, err
 }
 
@@ -143,8 +143,8 @@ func (self *ReadOnlyCursor) FirstInSameKey() (val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) Last() (key, val []byte, err error) {
-	return self.moveAndGet0(last)
+func (cursor *ReadOnlyCursor) Last() (key, val []byte, err error) {
+	return cursor.moveAndGet0(last)
 }
 
 // Only for DupSort. Move to the last key-value pair without changing
@@ -152,8 +152,8 @@ func (self *ReadOnlyCursor) Last() (key, val []byte, err error) {
 //
 // Do not write into the returned val byte slice. Doing so will cause
 // a segfault.
-func (self *ReadOnlyCursor) LastInSameKey() (val []byte, err error) {
-	_, val, err = self.moveAndGet0(lastDup)
+func (cursor *ReadOnlyCursor) LastInSameKey() (val []byte, err error) {
+	_, val, err = cursor.moveAndGet0(lastDup)
 	return val, err
 }
 
@@ -161,8 +161,8 @@ func (self *ReadOnlyCursor) LastInSameKey() (val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) Current() (key, val []byte, err error) {
-	return self.moveAndGet0(getCurrent)
+func (cursor *ReadOnlyCursor) Current() (key, val []byte, err error) {
+	return cursor.moveAndGet0(getCurrent)
 }
 
 // Move to the next key-value pair.
@@ -173,8 +173,8 @@ func (self *ReadOnlyCursor) Current() (key, val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) Next() (key, val []byte, err error) {
-	return self.moveAndGet0(next)
+func (cursor *ReadOnlyCursor) Next() (key, val []byte, err error) {
+	return cursor.moveAndGet0(next)
 }
 
 // Only for DupSort. Move to the next key-value pair, but only if the
@@ -182,16 +182,16 @@ func (self *ReadOnlyCursor) Next() (key, val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) NextInSameKey() (key, val []byte, err error) {
-	return self.moveAndGet0(nextDup)
+func (cursor *ReadOnlyCursor) NextInSameKey() (key, val []byte, err error) {
+	return cursor.moveAndGet0(nextDup)
 }
 
 // Only for DupSort. Move to the first key-value pair of the next key.
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) NextKey() (key, val []byte, err error) {
-	return self.moveAndGet0(nextNoDup)
+func (cursor *ReadOnlyCursor) NextKey() (key, val []byte, err error) {
+	return cursor.moveAndGet0(nextNoDup)
 }
 
 // Move to the previous key-value pair.
@@ -202,8 +202,8 @@ func (self *ReadOnlyCursor) NextKey() (key, val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) Prev() (key, val []byte, err error) {
-	return self.moveAndGet0(prev)
+func (cursor *ReadOnlyCursor) Prev() (key, val []byte, err error) {
+	return cursor.moveAndGet0(prev)
 }
 
 // Only for DupSort. Move to the previous key-value pair, but only if
@@ -211,8 +211,8 @@ func (self *ReadOnlyCursor) Prev() (key, val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) PrevInSameKey() (key, val []byte, err error) {
-	return self.moveAndGet0(prevDup)
+func (cursor *ReadOnlyCursor) PrevInSameKey() (key, val []byte, err error) {
+	return cursor.moveAndGet0(prevDup)
 }
 
 // Only for DupSort. Move to the last key-value pair of the previous
@@ -220,8 +220,8 @@ func (self *ReadOnlyCursor) PrevInSameKey() (key, val []byte, err error) {
 //
 // Do not write into the returned key or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) PrevKey() (key, val []byte, err error) {
-	return self.moveAndGet0(prevNoDup)
+func (cursor *ReadOnlyCursor) PrevKey() (key, val []byte, err error) {
+	return cursor.moveAndGet0(prevNoDup)
 }
 
 // Move to the key-value pair indicated by the given key.
@@ -232,8 +232,8 @@ func (self *ReadOnlyCursor) PrevKey() (key, val []byte, err error) {
 //
 // Do not write into the returned val byte slice. Doing so will cause
 // a segfault.
-func (self *ReadOnlyCursor) SeekExactKey(key []byte) (val []byte, err error) {
-	_, val, err = self.moveAndGet1(setKey, key)
+func (cursor *ReadOnlyCursor) SeekExactKey(key []byte) (val []byte, err error) {
+	_, val, err = cursor.moveAndGet1(setKey, key)
 	return val, err
 }
 
@@ -244,24 +244,24 @@ func (self *ReadOnlyCursor) SeekExactKey(key []byte) (val []byte, err error) {
 //
 // Do not write into the returned keyOut or val byte slices. Doing so
 // will cause a segfault.
-func (self *ReadOnlyCursor) SeekGreaterThanOrEqualKey(keyIn []byte) (keyOut, val []byte, err error) {
-	return self.moveAndGet1(setRange, keyIn)
+func (cursor *ReadOnlyCursor) SeekGreaterThanOrEqualKey(keyIn []byte) (keyOut, val []byte, err error) {
+	return cursor.moveAndGet1(setRange, keyIn)
 }
 
 // Only for DupSort. Move to the key-value pair indicated.
 //
 // If the exact key-value pair doesn't exist, return NotFound.
-func (self *ReadOnlyCursor) SeekExactKeyAndValue(keyIn, valIn []byte) (err error) {
-	_, err = self.moveAndGet2(getBoth, keyIn, valIn)
+func (cursor *ReadOnlyCursor) SeekExactKeyAndValue(keyIn, valIn []byte) (err error) {
+	_, err = cursor.moveAndGet2(getBoth, keyIn, valIn)
 	return err
 }
 
 // Only for DupSort. Return the number values with the current key.
-func (self *ReadOnlyCursor) Count() (count uint64, err error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (cursor *ReadOnlyCursor) Count() (count uint64, err error) {
+	if atomic.LoadUint32(cursor.resizeRequired) == 1 {
 		return 0, MapFull
 	}
-	err = asError(C.mdb_cursor_count(self.cursor, (*C.size_t)(&count)))
+	err = asError(C.mdb_cursor_count(cursor.cursor, (*C.size_t)(&count)))
 	if err != nil {
 		return 0, err
 	}
@@ -275,8 +275,8 @@ func (self *ReadOnlyCursor) Count() (count uint64, err error) {
 // not move to a greater key, only a greater value.
 //
 // If there is no such value within the current key, return NotFound.
-func (self *ReadOnlyCursor) SeekGreaterThanOrEqualKeyAndValue(keyIn, valIn []byte) (valOut []byte, err error) {
-	return self.moveAndGet2(getBothRange, keyIn, valIn)
+func (cursor *ReadOnlyCursor) SeekGreaterThanOrEqualKeyAndValue(keyIn, valIn []byte) (valOut []byte, err error) {
+	return cursor.moveAndGet2(getBothRange, keyIn, valIn)
 }
 
 // Delete the key-value pair at the cursor.
@@ -285,6 +285,6 @@ func (self *ReadOnlyCursor) SeekGreaterThanOrEqualKeyAndValue(keyIn, valIn []byt
 // databases, and means "delete all values for the current key".
 //
 // See http://www.lmdb.tech/doc/group__mdb.html#ga26a52d3efcfd72e5bf6bd6960bf75f95
-func (self *ReadWriteCursor) Delete(flags PutFlag) error {
-	return asError(C.mdb_cursor_del(self.cursor, C.uint(flags)))
+func (cursor *ReadWriteCursor) Delete(flags PutFlag) error {
+	return asError(C.mdb_cursor_del(cursor.cursor, C.uint(flags)))
 }

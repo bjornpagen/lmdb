@@ -2,7 +2,7 @@
 
 This is a high-level binding to [LMDB](https://www.symas.com/lmdb).
 
-    go get wellquite.org/golmdb@latest
+    go get github.com/bjornpagen/lmdb
 
 This binding uses [cgo](https://pkg.go.dev/cmd/cgo) and so to build,
 you'll need a working cgo environment: a supported C compiler suite,
@@ -50,5 +50,4 @@ binding will not save you from yourself! Refer back to the original
 [LMDB docs](http://www.lmdb.tech/doc/group__mdb.html) if you're in any
 doubt.
 
-There are a few more words about this over on [my
-blog](https://wellquite.org/posts/golmdb/)
+There are a few more words about this over on [Matthew's blog](https://wellquite.org/posts/golmdb/)

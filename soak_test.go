@@ -155,7 +155,7 @@ func makeAllKeys(rng *rand.Rand) ([][8]byte, map[[8]byte][8]byte) {
 	return keys, keyValueMap
 }
 
-func runViewer(allViewersFinishedWG, viewersStartedWG *sync.WaitGroup, client *lmdb.LMDBClient, dbRef lmdb.DBRef, toCheck [][8]byte, keyValueMapSnapshot map[[8]byte][8]byte, errLock *sync.Mutex, errs *[]error) {
+func runViewer(allViewersFinishedWG, viewersStartedWG *sync.WaitGroup, client *lmdb.Client, dbRef lmdb.DBRef, toCheck [][8]byte, keyValueMapSnapshot map[[8]byte][8]byte, errLock *sync.Mutex, errs *[]error) {
 	defer allViewersFinishedWG.Done()
 	started := false
 	err := client.View(func(rotxn *lmdb.ReadOnlyTxn) (err error) {
@@ -185,7 +185,7 @@ func runViewer(allViewersFinishedWG, viewersStartedWG *sync.WaitGroup, client *l
 	}
 }
 
-func modify(rng *rand.Rand, client *lmdb.LMDBClient, dbRef lmdb.DBRef, keyValueMap map[[8]byte][8]byte, toModify [][8]byte) (keyValueMapModified map[[8]byte][8]byte, modifiedCount int, err error) {
+func modify(rng *rand.Rand, client *lmdb.Client, dbRef lmdb.DBRef, keyValueMap map[[8]byte][8]byte, toModify [][8]byte) (keyValueMapModified map[[8]byte][8]byte, modifiedCount int, err error) {
 	// Because the txn can run multiple times (the txn could fail due
 	// to out of space and so gets re-run once the database size is
 	// increased), we want to form these skips outside the txn so that

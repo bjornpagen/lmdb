@@ -26,8 +26,8 @@ type value C.MDB_val
 
 // this is for getting a Go-slice from memory owned by C. Go will not
 // try and garbage collect it as it's memory owned by C.
-func (self *value) bytesNoCopy() []byte {
-	return unsafe.Slice((*byte)(self.mv_data), self.mv_size)
+func (v *value) bytesNoCopy() []byte {
+	return unsafe.Slice((*byte)(v.mv_data), v.mv_size)
 }
 
 type ReadOnlyTxn struct {
@@ -54,14 +54,14 @@ type ReadWriteTxn struct {
 //
 // See
 // http://www.lmdb.tech/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a
-func (self *ReadOnlyTxn) DBRef(name string, flags DatabaseFlag) (DBRef, error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (txn *ReadOnlyTxn) DBRef(name string, flags DatabaseFlag) (DBRef, error) {
+	if atomic.LoadUint32(txn.resizeRequired) == 1 {
 		return 0, MapFull
 	}
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 	var dbRef C.MDB_dbi
-	err := asError(C.mdb_dbi_open(self.txn, cName, C.uint(flags), &dbRef))
+	err := asError(C.mdb_dbi_open(txn.txn, cName, C.uint(flags), &dbRef))
 	if err != nil {
 		return 0, err
 	}
@@ -73,8 +73,8 @@ func (self *ReadOnlyTxn) DBRef(name string, flags DatabaseFlag) (DBRef, error) {
 //
 // See
 // http://www.lmdb.tech/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db
-func (self *ReadWriteTxn) Empty(db DBRef) error {
-	return self.emptyOrDrop(db, 0)
+func (txn *ReadWriteTxn) Empty(db DBRef) error {
+	return txn.emptyOrDrop(db, 0)
 }
 
 // Drop the database. Not only are all key-value pairs removed from
@@ -84,12 +84,12 @@ func (self *ReadWriteTxn) Empty(db DBRef) error {
 //
 // See
 // http://www.lmdb.tech/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db
-func (self *ReadWriteTxn) Drop(db DBRef) error {
-	return self.emptyOrDrop(db, 1)
+func (txn *ReadWriteTxn) Drop(db DBRef) error {
+	return txn.emptyOrDrop(db, 1)
 }
 
-func (self *ReadWriteTxn) emptyOrDrop(db DBRef, flag C.int) error {
-	return asError(C.mdb_drop(self.txn, C.MDB_dbi(db), flag))
+func (txn *ReadWriteTxn) emptyOrDrop(db DBRef, flag C.int) error {
+	return asError(C.mdb_drop(txn.txn, C.MDB_dbi(db), flag))
 }
 
 // Get the value corresponding to the key from the database.
@@ -101,13 +101,13 @@ func (self *ReadWriteTxn) emptyOrDrop(db DBRef, flag C.int) error {
 //
 // See
 // http://www.lmdb.tech/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d
-func (self *ReadOnlyTxn) Get(db DBRef, key []byte) ([]byte, error) {
-	if atomic.LoadUint32(self.resizeRequired) == 1 {
+func (txn *ReadOnlyTxn) Get(db DBRef, key []byte) ([]byte, error) {
+	if atomic.LoadUint32(txn.resizeRequired) == 1 {
 		return nil, MapFull
 	}
 	var data value
 	err := asError(C.golmdb_mdb_get(
-		self.txn, C.MDB_dbi(db),
+		txn.txn, C.MDB_dbi(db),
 		(*C.char)(unsafe.Pointer(&key[0])), C.size_t(len(key)),
 		(*C.MDB_val)(&data)))
 	if err != nil {
@@ -120,16 +120,16 @@ func (self *ReadOnlyTxn) Get(db DBRef, key []byte) ([]byte, error) {
 //
 // See
 // http://www.lmdb.tech/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0
-func (self *ReadWriteTxn) Put(db DBRef, key, val []byte, flags PutFlag) error {
+func (txn *ReadWriteTxn) Put(db DBRef, key, val []byte, flags PutFlag) error {
 	if len(val) == 0 {
 		return asError(C.golmdb_mdb_put(
-			self.txn, C.MDB_dbi(db),
+			txn.txn, C.MDB_dbi(db),
 			(*C.char)(unsafe.Pointer(&key[0])), C.size_t(len(key)),
 			nil, C.size_t(0),
 			C.uint(flags)))
 	} else {
 		return asError(C.golmdb_mdb_put(
-			self.txn, C.MDB_dbi(db),
+			txn.txn, C.MDB_dbi(db),
 			(*C.char)(unsafe.Pointer(&key[0])), C.size_t(len(key)),
 			(*C.char)(unsafe.Pointer(&val[0])), C.size_t(len(val)),
 			C.uint(flags)))
@@ -143,16 +143,16 @@ func (self *ReadWriteTxn) Put(db DBRef, key, val []byte, flags PutFlag) error {
 //
 // See
 // http://www.lmdb.tech/doc/group__mdb.html#gab8182f9360ea69ac0afd4a4eaab1ddb0
-func (self *ReadWriteTxn) Delete(db DBRef, key, val []byte) error {
+func (txn *ReadWriteTxn) Delete(db DBRef, key, val []byte) error {
 	if len(val) == 0 {
 		return asError(C.golmdb_mdb_del(
-			self.txn, C.MDB_dbi(db),
+			txn.txn, C.MDB_dbi(db),
 			(*C.char)(unsafe.Pointer(&key[0])), C.size_t(len(key)),
 			nil, C.size_t(0)))
 
 	} else {
 		return asError(C.golmdb_mdb_del(
-			self.txn, C.MDB_dbi(db),
+			txn.txn, C.MDB_dbi(db),
 			(*C.char)(unsafe.Pointer(&key[0])), C.size_t(len(key)),
 			(*C.char)(unsafe.Pointer(&val[0])), C.size_t(len(val))))
 	}

@@ -38,18 +38,18 @@ func newEnvironment() (*environment, error) {
 // Open a path in the environment. You can only open one path at a
 // time per environment. If the resulting error is non-nil, then you
 // must call environment.close()
-func (self *environment) open(path string, flags EnvironmentFlag, mode fs.FileMode) error {
+func (e *environment) open(path string, flags EnvironmentFlag, mode fs.FileMode) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
-	return asError(C.mdb_env_open(self.env, cPath, C.uint(flags), C.mdb_mode_t(mode)))
+	return asError(C.mdb_env_open(e.env, cPath, C.uint(flags), C.mdb_mode_t(mode)))
 }
 
 // mdb_env_close. http://www.lmdb.tech/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95
 // Must be called if opening failed. Once this is called, the
 // environment is unusable, and a new environment should be created.
-func (self *environment) close() {
-	C.mdb_env_close(self.env)
-	self.env = nil
+func (e *environment) close() {
+	C.mdb_env_close(e.env)
+	e.env = nil
 }
 
 // mdb_env_set_mapsize. http://www.lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5
@@ -60,15 +60,15 @@ func (self *environment) close() {
 //
 // The mapsize is persisted into the path (assuming one is opened) on
 // the next update to the path.
-func (self *environment) setMapSize(size uint64) error {
-	return asError(C.mdb_env_set_mapsize(self.env, C.size_t(size)))
+func (e *environment) setMapSize(size uint64) error {
+	return asError(C.mdb_env_set_mapsize(e.env, C.size_t(size)))
 }
 
 // Uses mdb_env_info to access the current map size.
 // http://www.lmdb.tech/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947
-func (self *environment) getMapSize() (uint64, error) {
+func (e *environment) getMapSize() (uint64, error) {
 	var cInfo C.MDB_envinfo
-	err := asError(C.mdb_env_info(self.env, &cInfo))
+	err := asError(C.mdb_env_info(e.env, &cInfo))
 	if err != nil {
 		return 0, err
 	}
@@ -77,44 +77,44 @@ func (self *environment) getMapSize() (uint64, error) {
 
 // mdb_env_set_maxreaders. http://www.lmdb.tech/doc/group__mdb.html#gae687966c24b790630be2a41573fe40e2
 // The default is 126. This function may only be called after mdb_env_create and before mdb_env_open.
-func (self *environment) setMaxReaders(size uint) error {
-	return asError(C.mdb_env_set_maxreaders(self.env, C.uint(size)))
+func (e *environment) setMaxReaders(size uint) error {
+	return asError(C.mdb_env_set_maxreaders(e.env, C.uint(size)))
 }
 
 // mdb_env_set_maxdbs. http://www.lmdb.tech/doc/group__mdb.html#gaa2fc2f1f37cb1115e733b62cab2fcdbc
 // This function may only be called after mdb_env_create and before mdb_env_open.
-func (self *environment) setMaxNumberOfDBs(max uint) error {
-	return asError(C.mdb_env_set_maxdbs(self.env, C.MDB_dbi(max)))
+func (e *environment) setMaxNumberOfDBs(max uint) error {
+	return asError(C.mdb_env_set_maxdbs(e.env, C.MDB_dbi(max)))
 }
 
 // mdb_txn_begin. http://www.lmdb.tech/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920
-func (self *environment) txnBegin(readOnlyTxn bool, parentTxn *C.MDB_txn) (txn *C.MDB_txn, err error) {
+func (e *environment) txnBegin(readOnlyTxn bool, parentTxn *C.MDB_txn) (txn *C.MDB_txn, err error) {
 	flags := C.uint(0)
 	if readOnlyTxn {
 		flags = C.uint(ReadOnly)
 	}
-	err = asError(C.mdb_txn_begin(self.env, parentTxn, flags, &txn))
+	err = asError(C.mdb_txn_begin(e.env, parentTxn, flags, &txn))
 	return
 }
 
 // mdb_env_sync. http://www.lmdb.tech/doc/group__mdb.html#ga85e61f05aa68b520cc6c3b981dba5037
-func (self *environment) sync(force bool) error {
+func (e *environment) sync(force bool) error {
 	forceNum := 0
 	if force {
 		forceNum = 1
 	}
-	return asError(C.mdb_env_sync(self.env, C.int(forceNum)))
+	return asError(C.mdb_env_sync(e.env, C.int(forceNum)))
 }
 
 // mdb_env_copy2. http://www.lmdb.tech/doc/group__mdb.html#ga3bf50d7793b36aaddf6b481a44e24244
-func (self *environment) copy(path string, compact bool) error {
+func (e *environment) copy(path string, compact bool) error {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 	flags := C.uint(0)
 	if compact {
 		flags = copyCompact
 	}
-	return asError(C.mdb_env_copy2(self.env, cPath, flags))
+	return asError(C.mdb_env_copy2(e.env, cPath, flags))
 }
 
 // NewLMDB opens an LMDB database at the given path, creating it if
@@ -138,7 +138,7 @@ func (self *environment) copy(path string, compact bool) error {
 // received without further delay. A reasonable starting value for
 // batchSize is the number of go-routines that could concurrently
 // submit Update transactions.
-func NewLMDB(log zerolog.Logger, path string, mode fs.FileMode, numReaders, numDBs uint, flags EnvironmentFlag, batchSize uint) (*LMDBClient, error) {
+func NewLMDB(log zerolog.Logger, path string, mode fs.FileMode, numReaders, numDBs uint, flags EnvironmentFlag, batchSize uint) (*Client, error) {
 	environment, err := setupEnvironment(path, mode, numReaders, numDBs, flags)
 	if err != nil {
 		return nil, err
@@ -162,7 +162,7 @@ func NewLMDB(log zerolog.Logger, path string, mode fs.FileMode, numReaders, numD
 // This is the same as NewLMDB, with the exception that the spawned
 // actor (if it is spawned) is spawned as a child of the manager,
 // rather than an unmanaged stand-alone actor.
-func NewManagedLMDB(manager actors.ManagerClient, path string, mode fs.FileMode, numReaders, numDBs uint, flags EnvironmentFlag, batchSize uint) (*LMDBClient, error) {
+func NewManagedLMDB(manager actors.ManagerClient, path string, mode fs.FileMode, numReaders, numDBs uint, flags EnvironmentFlag, batchSize uint) (*Client, error) {
 	environment, err := setupEnvironment(path, mode, numReaders, numDBs, flags)
 	if err != nil {
 		return nil, err

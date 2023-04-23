@@ -144,10 +144,10 @@ const (
 
 const minErrno, maxErrno = C.MDB_KEYEXIST, C.MDB_LAST_ERRCODE
 
-func (self LMDBError) Error() string {
-	str := C.GoString(C.mdb_strerror(C.int(self)))
+func (err LMDBError) Error() string {
+	str := C.GoString(C.mdb_strerror(C.int(err)))
 	if str == "" {
-		return fmt.Sprintf(`LMDB Error: %d`, int(self))
+		return fmt.Sprintf(`LMDB Error: %d`, int(err))
 	}
 	return str
 }

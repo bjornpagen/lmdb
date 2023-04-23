@@ -46,7 +46,7 @@ func TestError(t *testing.T) {
 	is.True(lmdb.LMDBError(lmdb.KeyExist).Error() != "")
 }
 
-func createDatabase(log zerolog.Logger, batchSize uint) (client *lmdb.LMDBClient, dir string, err error) {
+func createDatabase(log zerolog.Logger, batchSize uint) (client *lmdb.Client, dir string, err error) {
 	dir, err = os.MkdirTemp("", "golmdb")
 	if err != nil {
 		return nil, "", err
@@ -59,7 +59,7 @@ func createDatabase(log zerolog.Logger, batchSize uint) (client *lmdb.LMDBClient
 	return client, dir, nil
 }
 
-func createDBRef(client *lmdb.LMDBClient, name string, extraFlags lmdb.DatabaseFlag) (dbRef lmdb.DBRef, err error) {
+func createDBRef(client *lmdb.Client, name string, extraFlags lmdb.DatabaseFlag) (dbRef lmdb.DBRef, err error) {
 	err = client.Update(func(txn *lmdb.ReadWriteTxn) (err error) {
 		dbRef, err = txn.DBRef(name, lmdb.Create|extraFlags)
 		return err
