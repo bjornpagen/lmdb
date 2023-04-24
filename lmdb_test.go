@@ -197,7 +197,7 @@ func TestEmptyDrop(t *testing.T) {
 		if err = txn.Drop(dbRef); err != nil {
 			return err
 		}
-		dbRef, err = txn.DBRef(t.Name(), 0) // should still be there
+		_, err = txn.DBRef(t.Name(), 0) // should still be there
 		if err == nil {
 			return fmt.Errorf("Should have got error when trying to refresh dbRef after drop")
 		}
